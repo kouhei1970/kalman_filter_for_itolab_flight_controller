@@ -90,7 +90,6 @@ void printPQR(void);
 void loop_400Hz(void)
 {
   static uint8_t led=1;
-  S_time=time_us_32();
   
   //割り込みフラグリセット
   pwm_clear_irq(2);
@@ -172,7 +171,8 @@ void loop_400Hz(void)
     }
     else
     {
-      Arm_flag = 3;
+      Arm_flag = 2;
+      E_time=time_us_32();
       Phi_bias   = Phi_bias/KALMANWAIT;
       Theta_bias = Theta_bias/KALMANWAIT;
       Psi_bias   = Psi_bias/KALMANWAIT;
@@ -181,27 +181,9 @@ void loop_400Hz(void)
   }
   else if( Arm_flag==2)
   {
-    if(LockMode==2)
-    {
-      if(lock_com()==1)
-      {
-        LockMode=3;//Disenable Flight
-        led=0;
-        gpio_put(LED_PIN,led);
-        return;
-      }
-      //Goto Flight
-    }
-    else if(LockMode==3)
-    {
-      if(lock_com()==0){
-        LockMode=0;
-        Arm_flag=3;
-      }
-      return;
-    }
-    //LED Blink
+    //LED
     gpio_put(LED_PIN, led);
+    /*
     if(Logflag==1&&LedBlinkCounter<100){
       LedBlinkCounter++;
     }
@@ -210,62 +192,23 @@ void loop_400Hz(void)
       LedBlinkCounter=0;
       led=!led;
     }
+    */
    
     //Rate Control (400Hz)
+    sensor_read();
     rate_control();
-   
+
     if(AngleControlCounter==4)
     {
       AngleControlCounter=0;
       //Angle Control (100Hz)
       sem_release(&sem);
+      /*******************/
+      output_data();
+      /*******************/
     }
     AngleControlCounter++;
-  }
-  else if(Arm_flag==3)
-  {
-    motor_stop();
-    OverG_flag = 0;
-    if(LedBlinkCounter<10){
-      gpio_put(LED_PIN, 1);
-      LedBlinkCounter++;
-    }
-    else if(LedBlinkCounter<100)
-    {
-      gpio_put(LED_PIN, 0);
-      LedBlinkCounter++;
-    }
-    else LedBlinkCounter=0;
-    
-    //Get Stick Center 
-    Aileron_center  = Chdata[3];
-    Elevator_center = Chdata[1];
-    Rudder_center   = Chdata[0];
-  
-    if(LockMode==0)
-    {
-      if( lock_com()==1)
-      {
-        LockMode=1;
-        return;
-      }
-      //Wait  output log
-    }
-    else if(LockMode==1)
-    {
-      if(lock_com()==0)
-      {
-        LockMode=2;//Enable Flight
-        Arm_flag=2;
-      }
-      return;
-    }
 
-    if(logdata_out_com()==1)
-    {
-      Arm_flag=4;
-      return;
-    }
   }
   else if(Arm_flag==4)
   {
@@ -282,8 +225,10 @@ void loop_400Hz(void)
       led=!led;
     }
   }
+  S_time=E_time;
   E_time=time_us_32();
   D_time=E_time-S_time;
+  Elapsed_time = Elapsed_time + D_time*1e-6;     
 }
 
 void control_init(void)
@@ -365,12 +310,13 @@ void motor_stop(void)
 
 void rate_control(void)
 {
+  #if 0
   float p_rate, q_rate, r_rate;
   float p_ref, q_ref, r_ref;
   float p_err, q_err, r_err;
 
   //Read Sensor Value
-  sensor_read();
+  //sensor_read();
 
   //Get Bias
   //Pbias = Xe(4, 0);
@@ -454,8 +400,9 @@ void rate_control(void)
     }
     else motor_stop();
     //printf("%12.5f %12.5f %12.5f %12.5f\n",FR_duty, FL_duty, RR_duty, RL_duty);
+  
   }
- 
+  #endif
   //printf("\n");
 
   //printf("%12.5f %12.5f %12.5f %12.5f %12.5f %12.5f %12.5f %12.5f\n", 
@@ -493,6 +440,7 @@ void angle_control(void)
     Theta = atan2(-e13, sqrt(e23*e23+e33*e33));
     Psi = atan2(e12,e11);
 
+    #if 0
     //Get angle ref 
     Phi_ref   = Phi_trim   + 0.3 *M_PI*(float)(Chdata[3] - (CH4MAX+CH4MIN)*0.5)*2/(CH4MAX-CH4MIN);
     Theta_ref = Theta_trim + 0.3 *M_PI*(float)(Chdata[1] - (CH2MAX+CH2MIN)*0.5)*2/(CH2MAX-CH2MIN);
@@ -530,7 +478,7 @@ void angle_control(void)
 
     //Logging
     logging();
-
+    #endif
     E_time2=time_us_32();
     D_time2=E_time2-S_time2;
 
@@ -704,15 +652,29 @@ const float rot[9]={0.65330968, 0.75327755, -0.07589064,
 const float center[3]={122.37559195017053, 149.0184454603531, -138.99116060635413};
 //拡大係数
 const float zoom[3]={0.003077277151877191, 0.0031893151610213463, 0.0033832794976645804};
+
+//2024-1-14 ito house
+回転行列
+[[-0.0657942  -0.00590766 -0.99781573]
+ [ 0.99763123 -0.02050878 -0.06566061]
+ [-0.02007608 -0.99977222  0.00724302]]
+中心座標
+5.648847353168936 -193.3802574747123 -257.5090693432789
+W
+-90.88758005567871
+拡大係数
+0.0032887063828619494 0.0030975874477079364 0.0030819203799960977
+
+
 */
   //回転行列
-  const float rot[9]={-0.78435472, -0.62015392, -0.01402787,
-                       0.61753358, -0.78277935,  0.07686857,
-                      -0.05865107,  0.05162955,  0.99694255};
+  const float rot[9]={-0.0657942,  -0.00590766, -0.99781573,
+                       0.99763123, -0.02050878, -0.06566061,
+                      -0.02007608, -0.99977222,  0.00724302};
   //中心座標
-  const float center[3]={-109.32529343620176, 72.76584808916506, 759.2285249891385};
+  const float center[3]={5.648847353168936, -193.3802574747123, -257.5090693432789};
   //拡大係数
-  const float zoom[3]={0.002034773458122364, 0.002173892202021849, 0.0021819494099235273};
+  const float zoom[3]={0.0032887063828619494, 0.0030975874477079364, 0.0030819203799960977};
 
 //回転・平行移動・拡大
   mx1 = zoom[0]*( rot[0]*Mx0 +rot[1]*My0 +rot[2]*Mz0 -center[0]);
@@ -742,12 +704,13 @@ void variable_init(void)
         0.0   , 0.0    , 0.0    ,  0.0    , 5.0e-5 , 0.0   ,
         0.0   , 0.0    , 0.0    ,  0.0    , 0.0    , 5.0e-5;
 
-  R <<  1.701e0, 0.0     , 0.0     , 0.0   , 0.0   , 0.0   ,
-        0.0     , 2.799e0, 0.0     , 0.0   , 0.0   , 0.0   ,
-        0.0     , 0.0     , 1.056e0, 0.0   , 0.0   , 0.0   ,
-        0.0     , 0.0     , 0.0     , 2.3e-1, 0.0   , 0.0   ,
-        0.0     , 0.0     , 0.0     , 0.0   , 1.4e-1, 0.0   ,
-        0.0     , 0.0     , 0.0     , 0.0   , 0.0   , 0.49e-1;
+//2.276.E-04	2.174.E-04	2.268.E-04 1.341E-4	1.125E-4	9.787E-6
+  R <<  2.276e-4, 0.0     , 0.0     , 0.0   , 0.0   , 0.0   ,
+        0.0     , 2.174e-4, 0.0     , 0.0   , 0.0   , 0.0   ,
+        0.0     , 0.0     , 2.268e-4, 0.0   , 0.0   , 0.0   ,
+        0.0     , 0.0     , 0.0     , 1.341e-4, 0.0   , 0.0   ,
+        0.0     , 0.0     , 0.0     , 0.0   , 1.125e-4, 0.0   ,
+        0.0     , 0.0     , 0.0     , 0.0   , 0.0   , 9.787e-6;
           
   G <<   1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 
         -1.0, 1.0,-1.0, 0.0, 0.0, 0.0, 
@@ -811,10 +774,11 @@ void printPQR(void)
 
 void output_data(void)
 {
-  printf("%9.3f,"
+  printf("%9.4f,"
          "%13.8f,%13.8f,%13.8f,%13.8f,"
          "%13.8f,%13.8f,%13.8f,"
-         "%6lu,%6lu,"
+         "%13.8f,%13.8f,%13.8f,"
+         "%13.8f,%13.8f,%13.8f,"
          "%13.8f,%13.8f,%13.8f,"
          "%13.8f,%13.8f,%13.8f,"
          "%13.8f,%13.8f,%13.8f"
@@ -823,11 +787,12 @@ void output_data(void)
             ,Elapsed_time//1
             ,Xe(0,0), Xe(1,0), Xe(2,0), Xe(3,0)//2~5 
             ,Xe(4,0), Xe(5,0), Xe(6,0)//6~8
-            //,Phi-Phi_bias, Theta-Theta_bias, Psi-Psi_bias//6~8
-            ,D_time, D_time2//10,11
-            ,Ax, Ay, Az//11~13
-            ,Wp, Wq, Wr//14~16
-            ,Mx, My, Mz//17~19
+            ,Phi, Theta, Psi//9~11
+            ,Ax, Ay, Az//12~14
+            ,Wp, Wq, Wr//15~17
+            ,Mx, My, Mz//18~20
+            ,Mx0, My0, Mz0//21~23
+
             //,mag_norm
         ); //20
 }
